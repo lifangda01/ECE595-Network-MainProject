@@ -1,0 +1,25 @@
+<!doctype html>
+<html>
+    <body>
+        <h1>Upload and download a file</h1>
+
+        <form action="/transform" method="post" enctype="multipart/form-data">
+            <input type="file" name="data_file" />
+            <input type="submit" />
+        </form>
+
+        <h1>Query and download a file</h1>
+
+		<form action="{{ url_for('queryAndDownload') }}" method="get">
+			<dl>
+				<dt>Filename:
+				<dd><input type="text" name="filename">
+				<dd><input type="submit" value="Submit">
+			</dl>
+		</form>
+
+    	<p><a href="/test.mp4"> play </a></p>
+		{% block player %}{% endblock %}
+
+    </body>
+</html>
