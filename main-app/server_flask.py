@@ -37,8 +37,14 @@ def queryAndDownload():
 
 
 @app.route('/<filename>')
-def playHTML5Video(filename):
+def playVideo(filename):
 	return render_template('videoplayer.html', title=filename)
+
+
+@app.route('/hls/<filename>')
+def playHLSVideo(filename):
+	print filename
+	return render_template('hlsvideoplayer.html', title=filename)
 
 
 if __name__ == '__main__':
