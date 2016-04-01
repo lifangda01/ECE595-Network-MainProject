@@ -119,6 +119,7 @@ $(function () {
             });
         }
         this.downloadClusterData = function (callback) {
+            console.log("downloadClusterData"); // Called only once on initialization
             var totalRenditions = self.renditions.length;
             var renditionsDone = 0;
             _.each(self.renditions, function (rendition) {
@@ -135,6 +136,7 @@ $(function () {
                     if (renditionsDone === totalRenditions) {
                         callback();
                     }
+                    console.log("downloadClusterData.onload: renditionsDone = ", renditionsDone, "totalRenditions = ", totalRenditions);
                 };
             })
         }
@@ -146,7 +148,7 @@ $(function () {
                 rslt.init.size - 1,
                 true
             ));
-
+            console.log("createClusters: byteStart, byteEnd =", rslt.init.offset, rslt.init.size - 1, "(initCluster)");
             for (var i = 0; i < rslt.media.length; i++) {
                 self.clusters.push(new Cluster(
                     self.sourceFile + rendition + '.webm',
@@ -155,8 +157,9 @@ $(function () {
                     rslt.media[i].offset + rslt.media[i].size - 1,
                     false,
                     rslt.media[i].timecode,
-                    (i === rslt.media.length - 1) ? parseFloat(rslt.duration / 1000) : rslt.media[i + 1].timecode
-                ));
+                    (i === rslt.media.length - 1) ? parseFloat(rslt.duration / 1000) : rslt.media[i + 1].timecode));
+
+                    console.log("createClusters: byteStart, byteEnd =", rslt.media[i].offset, rslt.media[i].offset + rslt.media[i].size - 1);
             }
         }
         this.createSourceBuffer = function () {
@@ -165,6 +168,7 @@ $(function () {
                 self.flushBufferQueue();
             }, false);
             self.setState("Downloading clusters");
+            // Make sure downloadInitCluster and downloadCurrentCluster are both triggered
             self.downloadInitCluster(self.downloadCurrentCluster);
             self.videoElement.addEventListener('timeupdate', function () {
                 self.downloadUpcomingClusters();
@@ -174,13 +178,16 @@ $(function () {
         this.flushBufferQueue = function () {
             if (!self.sourceBuffer.updating) {
                 var initCluster = _.findWhere(self.clusters, {isInitCluster: true, rendition: self.rendition});
+                // Make sure the initCluster is present in the buffer first
                 if (initCluster.queued || initCluster.buffered) {
                     var bufferQueue = _.filter(self.clusters, function (cluster) {
                         return (cluster.queued === true && cluster.isInitCluster === false && cluster.rendition === self.rendition)
                     });
+                    // If initCluster is not yet buffered, add it to the beginning of array
                     if (!initCluster.buffered) {
                         bufferQueue.unshift(initCluster);
                     }
+                    // Buffer all queued data
                     if (bufferQueue.length) {
                         var concatData = self.concatClusterData(bufferQueue);
                         _.each(bufferQueue, function (bufferedCluster) {
@@ -189,14 +196,20 @@ $(function () {
                         });
                         self.sourceBuffer.appendBuffer(concatData);
                     }
+                    console.log("flushBufferQueue: bufferQueue.length =", bufferQueue.length)
                 }
             }
         }
         this.downloadInitCluster = function (callback) {
+            console.log("downloadInitCluster"); // Called every time switching rendition
+            // initCluster is needed for decoding the rest of the video
+            // Flush our queue of queued clusters such that the initialization cluster is always added first
             _.findWhere(self.clusters, {isInitCluster: true, rendition: self.rendition}).download(callback);
         }
         this.downloadCurrentCluster = function () {
+            console.log("downloadCurrentCluster"); // Only called once after initial downloadInitCluster
             var currentClusters = _.filter(self.clusters, function (cluster) {
+                // Current rendition && starting time less or equal to current play time
                 return (cluster.rendition === self.rendition && cluster.timeStart <= self.videoElement.currentTime && cluster.timeEnd > self.videoElement.currentTime)
             });
             if (currentClusters.length === 1) {
@@ -208,7 +221,9 @@ $(function () {
             }
         }
         this.downloadUpcomingClusters = function () {
+            console.log("downloadUpcomingClusters");
             var nextClusters = _.filter(self.clusters, function (cluster) {
+                // Not downloaded yet && current rendition && start time is within 5s from now
                 return (cluster.requested === false && cluster.rendition === self.rendition && cluster.timeStart > self.videoElement.currentTime && cluster.timeStart <= self.videoElement.currentTime + 5)
             });
             if (nextClusters.length) {
@@ -237,7 +252,7 @@ $(function () {
             var bufferArrayList = [];
             _.each(clusterList, function (cluster) {
                 bufferArrayList.push(cluster.data);
-            })
+            });
             var arrLength = 0;
             _.each(bufferArrayList, function (bufferArray) {
                 arrLength += bufferArray.length;
@@ -246,7 +261,7 @@ $(function () {
             var lengthSoFar = 0;
             _.each(bufferArrayList, function (bufferArray, idx) {
                 returnArray.set(bufferArray, lengthSoFar);
-                lengthSoFar += bufferArray.length
+                lengthSoFar += bufferArray.length;
             });
             return returnArray;
         };
