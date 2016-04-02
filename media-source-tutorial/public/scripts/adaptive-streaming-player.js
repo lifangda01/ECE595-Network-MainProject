@@ -196,7 +196,14 @@ $(function () {
                         });
                         self.sourceBuffer.appendBuffer(concatData);
                     }
-                    console.log("flushBufferQueue: bufferQueue.length =", bufferQueue.length)
+                    // console.log("flushBufferQueue: bufferQueue.length =", bufferQueue.length)
+                    _.each(bufferQueue, function (cluster) {
+                        console.log("flushBufferQueue: cluster timeStart, timeEnd =", cluster.timeStart, cluster.timeEnd);
+                    });
+                    var buf = self.sourceBuffer.buffered;
+                    if (buf.length == 1) {
+                        console.log("flushBufferQueue: sourceBuffer.buffered =", buf.start(0), buf.end(0));
+                    }
                 }
             }
         }
@@ -221,7 +228,7 @@ $(function () {
             }
         }
         this.downloadUpcomingClusters = function () {
-            console.log("downloadUpcomingClusters");
+            // console.log("downloadUpcomingClusters");
             var nextClusters = _.filter(self.clusters, function (cluster) {
                 // Not downloaded yet && current rendition && start time is within 5s from now
                 return (cluster.requested === false && cluster.rendition === self.rendition && cluster.timeStart > self.videoElement.currentTime && cluster.timeStart <= self.videoElement.currentTime + 5)
@@ -324,10 +331,12 @@ $(function () {
                 return (cluster.queued || cluster.buffered)
             }));
             var res = ((mapOut.time / 1000) / mapOut.size);
+            console.log("getDownloadTimePerByte: mapOut.time, mapOut.size =", mapOut.time, mapOut.size);
             return res;
         };
         this.checkBufferingSpeed = function () {
             var secondsToDownloadPerByte = self.getDownloadTimePerByte();
+            // console.log("checkBufferingSpeed: secondsToDownloadPerByte =", secondsToDownloadPerByte);
             var nextCluster = self.getNextCluster();
             var upcomingBytesPerSecond = (nextCluster.byteEnd - nextCluster.byteStart) / (nextCluster.timeEnd - nextCluster.timeStart);
             var estimatedSecondsToDownloadPerSecondOfPlayback = secondsToDownloadPerByte * upcomingBytesPerSecond;
