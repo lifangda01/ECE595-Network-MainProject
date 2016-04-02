@@ -5,8 +5,8 @@ $(function () {
         var self = this;
         self.clusters = [];
         self.renditions = ["180", "1080"];
-        self.rendition = "1080"
-
+        self.rendition = "1080";
+        self.algorithm = "BBA-0";
 
         function Cluster(fileUrl, rendition, byteStart, byteEnd, isInitCluster, timeStart, timeEnd) {
             this.byteStart = byteStart; //byte range start inclusive
@@ -158,8 +158,8 @@ $(function () {
                     false,
                     rslt.media[i].timecode,
                     (i === rslt.media.length - 1) ? parseFloat(rslt.duration / 1000) : rslt.media[i + 1].timecode));
-
-                    console.log("createClusters: byteStart, byteEnd =", rslt.media[i].offset, rslt.media[i].offset + rslt.media[i].size - 1);
+                console.log("createClusters: byteStart, byteEnd =", rslt.media[i].offset, rslt.media[i].offset + rslt.media[i].size - 1, 
+                            " timetart, timeEnd =", rslt.media[i].timecode, (i === rslt.media.length - 1) ? parseFloat(rslt.duration / 1000) : rslt.media[i + 1].timecode);
             }
         }
         this.createSourceBuffer = function () {
@@ -172,9 +172,31 @@ $(function () {
             self.downloadInitCluster(self.downloadCurrentCluster);
             self.videoElement.addEventListener('timeupdate', function () {
                 self.downloadUpcomingClusters();
-                self.checkBufferingSpeed();
+                if (self.algorithm) {
+                    self.checkBufferingSpeedNew();
+                } else {
+                    self.checkBufferingSpeed();
+                }
+                self.removePlayedClusterFromBuffer();
             }, false);
         }
+        this.removePlayedClusterFromBuffer = function () {
+            if (!self.sourceBuffer.updating) {
+                // Remove the cluster that has been buffereed, is not initCluster and has finished
+                var playedClusters = _.filter(self.clusters, function (cluster) {
+                    return (cluster.buffered === true && cluster.isInitCluster === false &&
+                            cluster.timeEnd < self.videoElement.currentTime)
+                });
+                if (playedClusters.length) {
+                    _.each(playedClusters, function (cluster) {
+                        cluster.buffered = false;
+                        console.log("removePlayedClusterFromBuffer: removing", cluster.timeStart === -1 ? 0 : cluster.timeStart, cluster.timeEnd);
+                        self.sourceBuffer.remove(cluster.timeStart === -1 ? 0 : cluster.timeStart, cluster.timeEnd);
+                    })
+                };
+            }
+        }
+
         this.flushBufferQueue = function () {
             if (!self.sourceBuffer.updating) {
                 var initCluster = _.findWhere(self.clusters, {isInitCluster: true, rendition: self.rendition});
@@ -184,7 +206,9 @@ $(function () {
                         return (cluster.queued === true && cluster.isInitCluster === false && cluster.rendition === self.rendition)
                     });
                     // If initCluster is not yet buffered, add it to the beginning of array
+                    // This is only executed once for each rendition
                     if (!initCluster.buffered) {
+                        // console.log("flushBufferQueue: buffer initCluster");
                         bufferQueue.unshift(initCluster);
                     }
                     // Buffer all queued data
@@ -196,10 +220,9 @@ $(function () {
                         });
                         self.sourceBuffer.appendBuffer(concatData);
                     }
-                    // console.log("flushBufferQueue: bufferQueue.length =", bufferQueue.length)
-                    _.each(bufferQueue, function (cluster) {
-                        console.log("flushBufferQueue: cluster timeStart, timeEnd =", cluster.timeStart, cluster.timeEnd);
-                    });
+                    // _.each(bufferQueue, function (cluster) {
+                    //     console.log("flushBufferQueue: cluster timeStart, timeEnd =", cluster.timeStart, cluster.timeEnd);
+                    // });
                     var buf = self.sourceBuffer.buffered;
                     if (buf.length == 1) {
                         console.log("flushBufferQueue: sourceBuffer.buffered =", buf.start(0), buf.end(0));
@@ -324,16 +347,77 @@ $(function () {
                 throw new Error("No more upcoming clusters");
             }
         };
-
-
+        this.getPrevClusterDownloadBytesPerSecond = function () {
+            var prevCluster = _.filter(self.clusters, function (cluster) {
+                return (cluster.queued || cluster.buffered)
+            }).slice(-1)[0];
+            var res = (prevCluster.byteEnd - prevCluster.byteStart) /
+                        ((prevCluster.queuedTime - prevCluster.requestedTime) / 1000);
+            // console.log("getPrevClusterDownloadBytesPerSecond: prevClusterMap MB/sec =", res/1000000);
+            return res;
+        }
+        // Calculate the accumulative speed
         this.getDownloadTimePerByte = function () {    //seconds per byte
             var mapOut = this.downloadTimeMR(_.filter(self.clusters, function (cluster) {
                 return (cluster.queued || cluster.buffered)
             }));
             var res = ((mapOut.time / 1000) / mapOut.size);
-            console.log("getDownloadTimePerByte: mapOut.time, mapOut.size =", mapOut.time, mapOut.size);
+            // console.log("getDownloadTimePerByte: mapOut.time, mapOut.size =", mapOut.time, mapOut.size);
             return res;
         };
+        this.getNextRateFromRateMap = function () {
+            // In default example video, 1080P requires ~72000 B/s, 180P requires ~22000 B/s
+            var R = [20000, 70000];
+            var B = [11, 19];
+            var buf = self.sourceBuffer.buffered;
+            var BO;
+            if (buf.length == 1) {
+                BO = buf.end(0) - buf.start(0);
+            } else {
+                BO = 0;
+            }
+            // Look up the piecewise ratemap function
+            if (BO < B[0]) {
+
+            } else if (BO > B[B.length-1]) {
+
+            } else {
+                
+            }
+        };
+        this.checkBufferingSpeedNew = function () {
+            var prevClusterBytesPerSecond = self.getPrevClusterDownloadBytesPerSecond();
+            var nextCluster = self.getNextCluster();
+            var upcomingBytesPerSecond = (nextCluster.byteEnd - nextCluster.byteStart) / (nextCluster.timeEnd - nextCluster.timeStart);
+            var estimatedSecondsToDownloadPerSecondOfPlayback = secondsToDownloadPerByte * upcomingBytesPerSecond;
+
+            var overridenFactor = self.networkSpeed ? self.networkSpeed : Math.round(estimatedSecondsToDownloadPerSecondOfPlayback * 10000) / 10000;
+
+            $('#factor-display').html(overridenFactor);
+
+            var lowClusters = this.getClustersSorted("180");
+            if (lowClusters.length) {
+                $('#180-end').html(Math.round(lowClusters[lowClusters.length - 1].timeEnd*10)/10);
+                $('#180-start').html(lowClusters[0].timeStart === -1 ? "0.0" :Math.round(lowClusters[0].timeStart*10)/10);
+            }
+
+            var highClusters = this.getClustersSorted("1080");
+            if (highClusters.length) {
+                $('#1080-end').html(Math.round(highClusters[highClusters.length - 1].timeEnd*10)/10);
+                $('#1080-start').html(highClusters[0].timeStart === -1 ? "0.0" : Math.round(highClusters[0].timeStart*10)/10);
+            }
+
+            if (overridenFactor > 0.8) {
+                if (self.rendition !== "180") {
+                    self.switchRendition("180")
+                }
+            } else {
+                //do this if you want to move rendition up automatically
+                //if (self.rendition !== "1080") {
+                //    self.switchRendition("1080")
+                //}
+            }
+        }
         this.checkBufferingSpeed = function () {
             var secondsToDownloadPerByte = self.getDownloadTimePerByte();
             // console.log("checkBufferingSpeed: secondsToDownloadPerByte =", secondsToDownloadPerByte);
