@@ -4,9 +4,11 @@ $(function () {
     var BasicPlayer = function () {
         var self = this;
         self.clusters = [];
-        self.renditions = ["180", "1080"];
+        self.renditions = ["180","360","480","720","1080"];
+        // self.renditions = ["180","1080"];
         self.rendition = "1080";
-        self.algorithm = "BBA-0";
+        self.algorithm = "BBA1";
+        self.MAXBUFFERLENGTH = 15; // Fetch ahead max 30s (the farthest cluster starts within 30s)
 
         function Cluster(fileUrl, rendition, byteStart, byteEnd, isInitCluster, timeStart, timeEnd) {
             this.byteStart = byteStart; //byte range start inclusive
@@ -23,6 +25,10 @@ $(function () {
             this.rendition = rendition;
             this.requestedTime = null;
             this.queuedTime = null;
+
+            this.size = byteEnd - byteStart;
+            this.duration = timeEnd - timeStart;
+            this.bitRate = this.size / this.duration;
         }
 
         Cluster.prototype.download = function (callback) {
@@ -148,7 +154,7 @@ $(function () {
                 rslt.init.size - 1,
                 true
             ));
-            console.log("createClusters: byteStart, byteEnd =", rslt.init.offset, rslt.init.size - 1, "(initCluster)");
+            // console.log("createClusters: byteStart, byteEnd =", rslt.init.offset, rslt.init.size - 1, "(initCluster)");
             for (var i = 0; i < rslt.media.length; i++) {
                 self.clusters.push(new Cluster(
                     self.sourceFile + rendition + '.webm',
@@ -158,8 +164,8 @@ $(function () {
                     false,
                     rslt.media[i].timecode,
                     (i === rslt.media.length - 1) ? parseFloat(rslt.duration / 1000) : rslt.media[i + 1].timecode));
-                console.log("createClusters: byteStart, byteEnd =", rslt.media[i].offset, rslt.media[i].offset + rslt.media[i].size - 1, 
-                            " timetart, timeEnd =", rslt.media[i].timecode, (i === rslt.media.length - 1) ? parseFloat(rslt.duration / 1000) : rslt.media[i + 1].timecode);
+                // console.log("createClusters: byteStart, byteEnd =", rslt.media[i].offset, rslt.media[i].offset + rslt.media[i].size - 1, 
+                            // " timetart, timeEnd =", rslt.media[i].timecode, (i === rslt.media.length - 1) ? parseFloat(rslt.duration / 1000) : rslt.media[i + 1].timecode);
             }
         }
         this.createSourceBuffer = function () {
@@ -172,8 +178,10 @@ $(function () {
             self.downloadInitCluster(self.downloadCurrentCluster);
             self.videoElement.addEventListener('timeupdate', function () {
                 self.downloadUpcomingClusters();
-                if (self.algorithm) {
-                    self.checkBufferingSpeedNew();
+                if (self.algorithm == "BBA0") {
+                    self.checkBufferingSpeedBBA0();
+                } else if (self.algorithm == "BBA1") {
+                    self.checkBufferingSpeedBBA1();
                 } else {
                     self.checkBufferingSpeed();
                 }
@@ -181,20 +189,20 @@ $(function () {
             }, false);
         }
         this.removePlayedClusterFromBuffer = function () {
-            if (!self.sourceBuffer.updating) {
-                // Remove the cluster that has been buffereed, is not initCluster and has finished
-                var playedClusters = _.filter(self.clusters, function (cluster) {
-                    return (cluster.buffered === true && cluster.isInitCluster === false &&
-                            cluster.timeEnd < self.videoElement.currentTime)
-                });
-                if (playedClusters.length) {
-                    _.each(playedClusters, function (cluster) {
-                        cluster.buffered = false;
-                        console.log("removePlayedClusterFromBuffer: removing", cluster.timeStart === -1 ? 0 : cluster.timeStart, cluster.timeEnd);
+            // Remove the cluster that has been buffereed, is not initCluster and has finished
+            var playedClusters = _.filter(self.clusters, function (cluster) {
+                return (cluster.buffered === true && cluster.isInitCluster === false &&
+                        cluster.timeEnd < self.videoElement.currentTime-1)
+            });
+            if (playedClusters.length) {
+                _.each(playedClusters, function (cluster) {
+                    cluster.buffered = false;
+                    console.log("removePlayedClusterFromBuffer: removing", cluster.timeStart === -1 ? 0 : cluster.timeStart, cluster.timeEnd);
+                    if (!self.sourceBuffer.updating) {
                         self.sourceBuffer.remove(cluster.timeStart === -1 ? 0 : cluster.timeStart, cluster.timeEnd);
-                    })
-                };
-            }
+                    }
+                })
+            };
         }
 
         this.flushBufferQueue = function () {
@@ -254,7 +262,16 @@ $(function () {
             // console.log("downloadUpcomingClusters");
             var nextClusters = _.filter(self.clusters, function (cluster) {
                 // Not downloaded yet && current rendition && start time is within 5s from now
-                return (cluster.requested === false && cluster.rendition === self.rendition && cluster.timeStart > self.videoElement.currentTime && cluster.timeStart <= self.videoElement.currentTime + 5)
+                if (typeof self.MAXBUFFERLENGTH === 'undefined') {
+                    return (cluster.requested === false && cluster.rendition === self.rendition && 
+                            cluster.timeStart > self.videoElement.currentTime && 
+                            cluster.timeStart <= self.videoElement.currentTime + 5)
+                } else {
+                    // -5 because of the length of the cluster itself
+                    return (cluster.requested === false && cluster.rendition === self.rendition && 
+                            cluster.timeStart > self.videoElement.currentTime && 
+                            cluster.timeStart <= self.videoElement.currentTime + self.MAXBUFFERLENGTH - 5)
+                }
             });
             if (nextClusters.length) {
                 self.setState("Buffering ahead");
@@ -322,6 +339,7 @@ $(function () {
             }
         );
         this.getClustersSorted = function (rendition) {
+            // Sort buffered cluster with current rendition by starting time
             return _.chain(self.clusters)
                 .filter(function (cluster) {
                     return (cluster.buffered === true && cluster.rendition == rendition && cluster.isInitCluster === false);
@@ -332,6 +350,7 @@ $(function () {
                 .value();
         }
         this.getNextCluster = function () {
+            // Returns the next cluster to download in the current rendition
             var unRequestedUpcomingClusters = _.chain(self.clusters)
                 .filter(function (cluster) {
                     return (!cluster.requested && cluster.timeStart >= self.videoElement.currentTime && cluster.rendition === self.rendition);
@@ -351,8 +370,13 @@ $(function () {
             var prevCluster = _.filter(self.clusters, function (cluster) {
                 return (cluster.queued || cluster.buffered)
             }).slice(-1)[0];
-            var res = (prevCluster.byteEnd - prevCluster.byteStart) /
+            var res;
+            if (prevCluster != undefined) {
+                res = (prevCluster.byteEnd - prevCluster.byteStart) /
                         ((prevCluster.queuedTime - prevCluster.requestedTime) / 1000);
+            } else {
+                res = 0;
+            };
             // console.log("getPrevClusterDownloadBytesPerSecond: prevClusterMap MB/sec =", res/1000000);
             return res;
         }
@@ -365,40 +389,104 @@ $(function () {
             // console.log("getDownloadTimePerByte: mapOut.time, mapOut.size =", mapOut.time, mapOut.size);
             return res;
         };
-        this.getNextRateFromRateMap = function () {
+        // Calculate the reservoir size dynamically based on the nominal rendition
+        this.getReservoirSize = function () {
+            // Calculate average bitrate of lowest rendition
+            var lowClusters = _.filter(self.clusters, function (cluster) {
+                    return (cluster.rendition == self.renditions[0] && cluster.isInitCluster == false);
+                });
+            var R_avg = _.chain(lowClusters)
+                .map(function (cluster) {
+                    return cluster.bitRate;
+                })
+                .reduce(function (memo, datum) {
+                    return memo + datum;
+                }, 0)
+                .value() / lowClusters.length;
+            // console.log("getReservoirSize: R_avg =", R_avg);
+            var Res = _.chain(lowClusters)
+                .filter(function (cluster) {
+                    // Get the clusters that haven't been played yet and start within X seconds
+                    return (cluster.timeStart > self.videoElement.currentTime && 
+                            cluster.timeStart < self.videoElement.currentTime + self.MAXBUFFERLENGTH);
+                })
+                .map(function (cluster) {
+                    return (cluster.bitRate - R_avg) * cluster.duration;
+                })
+                .reduce(function (memo, datum) {
+                    return memo + datum;
+                }, 0)
+                .value() / R_avg;
+            // Reservoir size is determined by difference between the bitrates of future segments and the average
+            // The plain way the paper calculates may not directly work on our example
+            // This sometimes gets negative, need to map it to some possitive value
+            // How? Simple clipping my not work well (too often to be negative)
+            console.log("getReservoirSize: Res =", Res);
+            return Res;
+        }
+        this.getNextRenditionFromRateMap = function () {
             // In default example video, 1080P requires ~72000 B/s, 180P requires ~22000 B/s
-            var R = [20000, 70000];
-            var B = [11, 19];
+            // var R = [45000, 70000, 100000, 220000, 400000];
+            // var B = [0.65, 0.8, 0.95, 1.1, 1.25];
+            // Bitrates (B/s)
+            var R = [45000, 70000, 100000, 220000, 400000];
+            // Buffer Occupancy (s)
+            var B = [0.75, 0.90, 1.05, 1.20, 1.35];
+            var R_p, R_m;
+            var R_prev = R[_.indexOf(self.renditions, self.rendition)];
+            var R_next;
+            var r_i = self.renditions;
             var buf = self.sourceBuffer.buffered;
             var BO;
-            if (buf.length == 1) {
-                BO = buf.end(0) - buf.start(0);
+            var a = (R[R.length-1] - R[0]) / (B[B.length-1] - B[0]);
+            var b = (R[0]*B[B.length-1] - R[R.length-1]*B[0]) / (B[B.length-1] - B[0]);
+            if (buf.length >= 1) {
+                BO = (buf.end(0) - buf.start(0)) / self.MAXBUFFERLENGTH;
             } else {
+                // console.log("buf.length =", buf.length)
                 BO = 0;
             }
+            console.log("getNextRenditionFromRateMap: BO =", BO);
+            // Determine R_p and R_m
+            if (R_prev === R[R.length-1]) {
+                R_p = R[R.length-1];
+            } else {
+                R_p = R[_.indexOf(R, R_prev)+1];
+            };
+            if (R_prev === R[0]) {
+                R_m = R[0];
+            } else {
+                R_m = R[_.indexOf(R, R_prev)-1];
+            };
             // Look up the piecewise ratemap function
             if (BO < B[0]) {
-
+                R_next = R[0];
             } else if (BO > B[B.length-1]) {
-
+                R_next = R[R.length-1];
             } else {
-                
-            }
+                var R_f = a * BO + b;
+                if (R_f >= R_p) {
+                    R_next = R[_.sortedIndex(R, R_f)-1];
+                } else if (R_f <= R_m) {
+                    R_next = R[_.sortedIndex(R, R_f)];
+                } else {
+                    R_next = R_prev;
+                };
+                console.log("getNextRenditionFromRateMap: R_f =", R_f);
+            };
+            return r_i[_.indexOf(R, R_next)];
         };
-        this.checkBufferingSpeedNew = function () {
+        this.checkBufferingSpeedBBA1 = function () {
             var prevClusterBytesPerSecond = self.getPrevClusterDownloadBytesPerSecond();
-            var nextCluster = self.getNextCluster();
-            var upcomingBytesPerSecond = (nextCluster.byteEnd - nextCluster.byteStart) / (nextCluster.timeEnd - nextCluster.timeStart);
-            var estimatedSecondsToDownloadPerSecondOfPlayback = secondsToDownloadPerByte * upcomingBytesPerSecond;
+            var nextRendition = self.getNextRenditionFromRateMap();
+            self.getReservoirSize();
 
-            var overridenFactor = self.networkSpeed ? self.networkSpeed : Math.round(estimatedSecondsToDownloadPerSecondOfPlayback * 10000) / 10000;
-
-            $('#factor-display').html(overridenFactor);
+            $('#factor-display').html(Math.round(prevClusterBytesPerSecond / 1024) + "kB/s");
 
             var lowClusters = this.getClustersSorted("180");
             if (lowClusters.length) {
                 $('#180-end').html(Math.round(lowClusters[lowClusters.length - 1].timeEnd*10)/10);
-                $('#180-start').html(lowClusters[0].timeStart === -1 ? "0.0" :Math.round(lowClusters[0].timeStart*10)/10);
+                $('#180-start').html(lowClusters[0].timeStart === -1 ? "0.0" : Math.round(lowClusters[0].timeStart*10)/10);
             }
 
             var highClusters = this.getClustersSorted("1080");
@@ -407,17 +495,42 @@ $(function () {
                 $('#1080-start').html(highClusters[0].timeStart === -1 ? "0.0" : Math.round(highClusters[0].timeStart*10)/10);
             }
 
-            if (overridenFactor > 0.8) {
-                if (self.rendition !== "180") {
-                    self.switchRendition("180")
-                }
+            if (nextRendition !== self.rendition) {
+                self.switchRendition(nextRendition);
             } else {
-                //do this if you want to move rendition up automatically
-                //if (self.rendition !== "1080") {
+                // Do this if you want to move rendition up automatically
+                // if (self.rendition !== "1080") {
                 //    self.switchRendition("1080")
-                //}
+                // }
             }
-        }
+        };
+        this.checkBufferingSpeedBBA0 = function () {
+            var prevClusterBytesPerSecond = self.getPrevClusterDownloadBytesPerSecond();
+            var nextRendition = self.getNextRenditionFromRateMap();
+
+            $('#factor-display').html(Math.round(prevClusterBytesPerSecond / 1024) + "kB/s");
+
+            var lowClusters = this.getClustersSorted("180");
+            if (lowClusters.length) {
+                $('#180-end').html(Math.round(lowClusters[lowClusters.length - 1].timeEnd*10)/10);
+                $('#180-start').html(lowClusters[0].timeStart === -1 ? "0.0" : Math.round(lowClusters[0].timeStart*10)/10);
+            }
+
+            var highClusters = this.getClustersSorted("1080");
+            if (highClusters.length) {
+                $('#1080-end').html(Math.round(highClusters[highClusters.length - 1].timeEnd*10)/10);
+                $('#1080-start').html(highClusters[0].timeStart === -1 ? "0.0" : Math.round(highClusters[0].timeStart*10)/10);
+            }
+
+            if (nextRendition !== self.rendition) {
+                self.switchRendition(nextRendition);
+            } else {
+                // Do this if you want to move rendition up automatically
+                // if (self.rendition !== "1080") {
+                //    self.switchRendition("1080")
+                // }
+            }
+        };
         this.checkBufferingSpeed = function () {
             var secondsToDownloadPerByte = self.getDownloadTimePerByte();
             // console.log("checkBufferingSpeed: secondsToDownloadPerByte =", secondsToDownloadPerByte);
@@ -432,7 +545,7 @@ $(function () {
             var lowClusters = this.getClustersSorted("180");
             if (lowClusters.length) {
                 $('#180-end').html(Math.round(lowClusters[lowClusters.length - 1].timeEnd*10)/10);
-                $('#180-start').html(lowClusters[0].timeStart === -1 ? "0.0" :Math.round(lowClusters[0].timeStart*10)/10);
+                $('#180-start').html(lowClusters[0].timeStart === -1 ? "0.0" : Math.round(lowClusters[0].timeStart*10)/10);
             }
 
             var highClusters = this.getClustersSorted("1080");
@@ -452,14 +565,14 @@ $(function () {
                 //}
             }
         }
-
-
     }
 
     var basicPlayer = new BasicPlayer();
     window.updatePlayer = function () {
-        var sourceFile = 'vidData/example';
-        var clusterData = 'vidData/example';
+        // var sourceFile = 'vidData/The_Bourne_Ultimatum';
+        // var clusterData = 'vidData/The_Bourne_Ultimatum';
+        var sourceFile = 'vidData/tbh/tbhFixed';
+        var clusterData = 'vidData/tbh/tbhFixed';
         basicPlayer.initiate(sourceFile, clusterData);
     }
     updatePlayer();

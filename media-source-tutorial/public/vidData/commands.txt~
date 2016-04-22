@@ -1,0 +1,5 @@
+ffmpeg -i bbb360.webm -c:v libvpx -b:v 128k -vf scale=-1:180 -c:a libvorbis bbb180.webm
+# If bbb180.webm doesn't work in the browser (localhost:5000/basic)
+mse_webm_remuxer bbb180.webm bbb180_1.webm
+# Test in localhost:5000/buffering
+mse_json_manifest bbb180.webm -> bbb180.json

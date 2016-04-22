@@ -1,0 +1,10 @@
+import subprocess
+
+renditions = [180, 360, 480, 720, 1080];
+bitrates = [180, 300, 500, 1000, 2000];
+input_name = 'The_Bourne_Ultimatum';
+output_name = 'tbh';
+for i in range(len(renditions)):
+	subprocess.call(['ffmpeg', '-i', input_name+str(renditions[i])+'.webm', '-c:v', 'libvpx', '-b:v', str(bitrates[i])+'k', '-vf', 'scale=-1:'+str(renditions[i]), '-keyint_min', '150', '-g', '150', '-threads', '4', '-c:a', 'libvorbis', output_name+str(renditions[i])+'.webm']);
+	subprocess.call(['mse_webm_remuxer', output_name+str(renditions[i])+'.webm', output_name+'Fixed'+str(renditions[i])+'.webm'])
+	subprocess.call(['mse_json_manifest', output_name+'Fixed'+str(renditions[i])+'.webm', '->', output_name+'Fixed'+str(renditions[i])+'.json'])

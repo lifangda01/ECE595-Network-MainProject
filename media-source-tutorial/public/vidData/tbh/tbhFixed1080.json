@@ -1,0 +1,22 @@
+{
+  "type": "video/webm; codecs=\"vp8, vorbis\"",
+  "duration": 89220.000000,
+  "init": { "offset": 0, "size": 4350},
+  "media": [
+    { "offset": 4350, "size": 325238, "timecode": 0.000000 },
+    { "offset": 329588, "size": 1373738, "timecode": 6.244000 },
+    { "offset": 1703326, "size": 1050895, "timecode": 12.495000 },
+    { "offset": 2754221, "size": 962017, "timecode": 18.767000 },
+    { "offset": 3716238, "size": 784683, "timecode": 25.012000 },
+    { "offset": 4500921, "size": 952799, "timecode": 31.260000 },
+    { "offset": 5453720, "size": 1013668, "timecode": 37.527000 },
+    { "offset": 6467388, "size": 1010826, "timecode": 43.786000 },
+    { "offset": 7478214, "size": 895543, "timecode": 50.042000 },
+    { "offset": 8373757, "size": 720645, "timecode": 56.306000 },
+    { "offset": 9094402, "size": 678498, "timecode": 62.551000 },
+    { "offset": 9772900, "size": 911011, "timecode": 68.799000 },
+    { "offset": 10683911, "size": 904362, "timecode": 75.058000 },
+    { "offset": 11588273, "size": 670482, "timecode": 81.324000 },
+    { "offset": 12258755, "size": 143557, "timecode": 87.588000 }
+  ]
+}

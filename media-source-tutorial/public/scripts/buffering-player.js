@@ -215,8 +215,8 @@ $(function () {
     var basicPlayer = new BasicPlayer();
 
     window.updatePlayer = function () {
-        var sourceFile = 'vidData/example.webm';
-        var clusterData = 'vidData/example.json';
+        var sourceFile = 'vidData/tbhFixed360.webm';
+        var clusterData = 'vidData/tbhFixed360.json';
         basicPlayer.initiate(sourceFile, clusterData);
     }
     updatePlayer();
