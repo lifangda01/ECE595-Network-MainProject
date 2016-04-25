@@ -5,6 +5,8 @@ $(function () {
         var self = this;
         self.clusters = [];
         self.renditions = ["180","360","480","720","1080"];
+        self.avgBitrates = [];
+        self.avgChunkSizes = [];
         // self.renditions = ["180","1080"];
         self.rendition = "1080";
         self.algorithm = "BBA1";
@@ -176,6 +178,8 @@ $(function () {
             self.setState("Downloading clusters");
             // Make sure downloadInitCluster and downloadCurrentCluster are both triggered
             self.downloadInitCluster(self.downloadCurrentCluster);
+            self.getAverageBitrates();
+            self.getAverageChunkSizes();
             self.videoElement.addEventListener('timeupdate', function () {
                 self.downloadUpcomingClusters();
                 if (self.algorithm == "BBA0") {
@@ -391,19 +395,15 @@ $(function () {
         };
         // Calculate the reservoir size dynamically based on the nominal rendition
         this.getReservoirSize = function () {
-            // Calculate average bitrate of lowest rendition
+            // Get the average bitrate of the lowest renditions first
+            var R_avg = self.avgBitrates[0];
+            // Reservoir size is determined by difference between the bitrates of future segments and the average
+            // The plain way the paper calculates may not directly work on our example
+            // This sometimes gets negative, need to map it to some positive value
+            // How? Simple clipping may not work well (too often to be negative)
             var lowClusters = _.filter(self.clusters, function (cluster) {
                     return (cluster.rendition == self.renditions[0] && cluster.isInitCluster == false);
                 });
-            var R_avg = _.chain(lowClusters)
-                .map(function (cluster) {
-                    return cluster.bitRate;
-                })
-                .reduce(function (memo, datum) {
-                    return memo + datum;
-                }, 0)
-                .value() / lowClusters.length;
-            // console.log("getReservoirSize: R_avg =", R_avg);
             var Res = _.chain(lowClusters)
                 .filter(function (cluster) {
                     // Get the clusters that haven't been played yet and start within X seconds
@@ -417,18 +417,109 @@ $(function () {
                     return memo + datum;
                 }, 0)
                 .value() / R_avg;
-            // Reservoir size is determined by difference between the bitrates of future segments and the average
-            // The plain way the paper calculates may not directly work on our example
-            // This sometimes gets negative, need to map it to some possitive value
-            // How? Simple clipping my not work well (too often to be negative)
-            console.log("getReservoirSize: Res =", Res);
+            // FIXME: hardcoded clipping
+            if (Res <= 1) {
+                Res = 2;
+            } else {
+                Res *= 2;
+            };
+            console.log("getReservoirSize: Res =", Res, Res / self.MAXBUFFERLENGTH);
             return Res;
+        }
+        this.getAverageBitrates = function () {
+            self.avgBitrates = _.map(self.renditions, function (rendition) {
+                var clusters = _.filter(self.clusters, function (cluster) {
+                        return (cluster.rendition == rendition && cluster.isInitCluster == false);
+                    });
+                var R_avg = _.chain(clusters)
+                    .map(function (cluster) {
+                        return cluster.bitRate;
+                    })
+                    .reduce(function (memo, datum) {
+                        return memo + datum;
+                    }, 0)
+                    .value() / clusters.length;   
+                return R_avg;             
+            });
+            console.log("getAverageBitrates: avgBitrates =", self.avgBitrates);
+        }
+        this.getAverageChunkSizes = function () {
+            self.avgChunkSizes = _.map(self.renditions, function (rendition) {
+                var clusters = _.filter(self.clusters, function (cluster) {
+                        return (cluster.rendition == rendition && cluster.isInitCluster == false);
+                    });
+                var C_avg = _.chain(clusters)
+                    .initial()
+                    .map(function (cluster) {
+                        return cluster.size;
+                    })
+                    .reduce(function (memo, datum) {
+                        return memo + datum;
+                    }, 0)
+                    .value() / (clusters.length - 1);   
+                return C_avg;             
+            });
+            console.log("getAverageChunkSizes: avgChunkSizes =", self.avgChunkSizes);
+        }
+        this.getNextRenditionFromChunkMap = function () {
+            var Res = self.getReservoirSize() / self.MAXBUFFERLENGTH;
+            // Chunk Size (B)
+            var C = self.avgChunkSizes;
+            // Buffer Occupancy (s)
+            // FIXME: fix the hardcodings...
+            var B = [0.75, 0.90, 1.05, 1.20, 1.35];
+            B = _.map(B, function (x) { return x + Res; })
+            var C_p, C_m;
+            var C_prev = C[_.indexOf(self.renditions, self.rendition)];
+            var C_next;
+            var r_i = self.renditions;
+            var buf = self.sourceBuffer.buffered;
+            var BO;
+            var a = (C[C.length-1] - C[0]) / (B[B.length-1] - B[0]);
+            var b = (C[0]*B[B.length-1] - C[C.length-1]*B[0]) / (B[B.length-1] - B[0]);
+            if (buf.length >= 1) {
+                BO = (buf.end(0) - buf.start(0)) / self.MAXBUFFERLENGTH;
+            } else {
+                // console.log("buf.length =", buf.length)
+                BO = 0;
+            }
+            console.log("getNextRenditionFromChunkMap: BO =", BO);
+            // Determine C_p and C_m
+            if (C_prev === C[C.length-1]) {
+                C_p = C[C.length-1];
+            } else {
+                C_p = C[_.indexOf(C, C_prev)+1];
+            };
+            if (C_prev === C[0]) {
+                C_m = C[0];
+            } else {
+                C_m = C[_.indexOf(C, C_prev)-1];
+            };
+            // Look up the piecewise ratemap function
+            if (BO < B[0]) {
+                C_next = C[0];
+            } else if (BO > B[B.length-1]) {
+                C_next = C[C.length-1];
+            } else {
+                var C_f = a * BO + b;
+                if (C_f >= C_p) {
+                    C_next = C[_.sortedIndex(C, C_f)-1];
+                } else if (C_f <= C_m) {
+                    C_next = C[_.sortedIndex(C, C_f)];
+                } else {
+                    C_next = C_prev;
+                };
+                console.log("getNextRenditionFromChunkMap: C_f =", C_f);
+            };
+            // Returns the rendition...
+            return r_i[_.indexOf(C, C_next)];   
         }
         this.getNextRenditionFromRateMap = function () {
             // In default example video, 1080P requires ~72000 B/s, 180P requires ~22000 B/s
             // var R = [45000, 70000, 100000, 220000, 400000];
             // var B = [0.65, 0.8, 0.95, 1.1, 1.25];
             // Bitrates (B/s)
+            // FIXME: might as well use average bitrates
             var R = [45000, 70000, 100000, 220000, 400000];
             // Buffer Occupancy (s)
             var B = [0.75, 0.90, 1.05, 1.20, 1.35];
@@ -474,12 +565,12 @@ $(function () {
                 };
                 console.log("getNextRenditionFromRateMap: R_f =", R_f);
             };
+            // Returns the rendition...
             return r_i[_.indexOf(R, R_next)];
         };
         this.checkBufferingSpeedBBA1 = function () {
             var prevClusterBytesPerSecond = self.getPrevClusterDownloadBytesPerSecond();
-            var nextRendition = self.getNextRenditionFromRateMap();
-            self.getReservoirSize();
+            var nextRendition = self.getNextRenditionFromChunkMap();
 
             $('#factor-display').html(Math.round(prevClusterBytesPerSecond / 1024) + "kB/s");
 
