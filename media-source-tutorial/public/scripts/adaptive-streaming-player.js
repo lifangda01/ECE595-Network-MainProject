@@ -11,6 +11,8 @@ $(function () {
         self.rendition = "1080";
         self.algorithm = "BBA1";
         self.MAXBUFFERLENGTH = 15; // Fetch ahead max 30s (the farthest cluster starts within 30s)
+        self.DEBUG = false;
+        self.LOGON = true;
 
         function Cluster(fileUrl, rendition, byteStart, byteEnd, isInitCluster, timeStart, timeEnd) {
             this.byteStart = byteStart; //byte range start inclusive
@@ -127,7 +129,7 @@ $(function () {
             });
         }
         this.downloadClusterData = function (callback) {
-            console.log("downloadClusterData"); // Called only once on initialization
+            // console.log("downloadClusterData"); // Called only once on initialization
             var totalRenditions = self.renditions.length;
             var renditionsDone = 0;
             _.each(self.renditions, function (rendition) {
@@ -144,7 +146,7 @@ $(function () {
                     if (renditionsDone === totalRenditions) {
                         callback();
                     }
-                    console.log("downloadClusterData.onload: renditionsDone = ", renditionsDone, "totalRenditions = ", totalRenditions);
+                    if (self.DEBUG) { console.log("downloadClusterData.onload: renditionsDone = ", renditionsDone, "totalRenditions = ", totalRenditions) };
                 };
             })
         }
@@ -201,7 +203,7 @@ $(function () {
             if (playedClusters.length) {
                 _.each(playedClusters, function (cluster) {
                     cluster.buffered = false;
-                    console.log("removePlayedClusterFromBuffer: removing", cluster.timeStart === -1 ? 0 : cluster.timeStart, cluster.timeEnd);
+                    if (self.DEBUG) { console.log("removePlayedClusterFromBuffer: removing", cluster.timeStart === -1 ? 0 : cluster.timeStart, cluster.timeEnd) };
                     if (!self.sourceBuffer.updating) {
                         self.sourceBuffer.remove(cluster.timeStart === -1 ? 0 : cluster.timeStart, cluster.timeEnd);
                     }
@@ -237,19 +239,19 @@ $(function () {
                     // });
                     var buf = self.sourceBuffer.buffered;
                     if (buf.length == 1) {
-                        console.log("flushBufferQueue: sourceBuffer.buffered =", buf.start(0), buf.end(0));
+                        if (self.DEBUG) { console.log("flushBufferQueue: sourceBuffer.buffered =", buf.start(0), buf.end(0)) };
                     }
                 }
             }
         }
         this.downloadInitCluster = function (callback) {
-            console.log("downloadInitCluster"); // Called every time switching rendition
+            // console.log("downloadInitCluster"); // Called every time switching rendition
             // initCluster is needed for decoding the rest of the video
             // Flush our queue of queued clusters such that the initialization cluster is always added first
             _.findWhere(self.clusters, {isInitCluster: true, rendition: self.rendition}).download(callback);
         }
         this.downloadCurrentCluster = function () {
-            console.log("downloadCurrentCluster"); // Only called once after initial downloadInitCluster
+            // console.log("downloadCurrentCluster"); // Only called once after initial downloadInitCluster
             var currentClusters = _.filter(self.clusters, function (cluster) {
                 // Current rendition && starting time less or equal to current play time
                 return (cluster.rendition === self.rendition && cluster.timeStart <= self.videoElement.currentTime && cluster.timeEnd > self.videoElement.currentTime)
@@ -423,7 +425,7 @@ $(function () {
             } else {
                 Res *= 2;
             };
-            console.log("getReservoirSize: Res =", Res, Res / self.MAXBUFFERLENGTH);
+            if (self.DEBUG) { console.log("getReservoirSize: Res =", Res, Res / self.MAXBUFFERLENGTH) };
             return Res;
         }
         this.getAverageBitrates = function () {
@@ -441,7 +443,7 @@ $(function () {
                     .value() / clusters.length;   
                 return R_avg;             
             });
-            console.log("getAverageBitrates: avgBitrates =", self.avgBitrates);
+            if (self.DEBUG) { console.log("getAverageBitrates: avgBitrates =", self.avgBitrates) };
         }
         this.getAverageChunkSizes = function () {
             self.avgChunkSizes = _.map(self.renditions, function (rendition) {
@@ -459,7 +461,7 @@ $(function () {
                     .value() / (clusters.length - 1);   
                 return C_avg;             
             });
-            console.log("getAverageChunkSizes: avgChunkSizes =", self.avgChunkSizes);
+            if (self.DEBUG) { console.log("getAverageChunkSizes: avgChunkSizes =", self.avgChunkSizes) };
         }
         this.getNextRenditionFromChunkMap = function () {
             var Res = self.getReservoirSize() / self.MAXBUFFERLENGTH;
@@ -483,7 +485,7 @@ $(function () {
                 // console.log("buf.length =", buf.length)
                 BO = 0;
             }
-            console.log("getNextRenditionFromChunkMap: BO =", BO);
+            if (self.DEBUG) { console.log("getNextRenditionFromChunkMap: BO =", BO) };
             // Determine C_p and C_m
             if (C_prev === C[C.length-1]) {
                 C_p = C[C.length-1];
@@ -509,7 +511,7 @@ $(function () {
                 } else {
                     C_next = C_prev;
                 };
-                console.log("getNextRenditionFromChunkMap: C_f =", C_f);
+                if (self.DEBUG) { console.log("getNextRenditionFromChunkMap: C_f =", C_f) };
             };
             // Returns the rendition...
             return r_i[_.indexOf(C, C_next)];   
@@ -537,7 +539,7 @@ $(function () {
                 // console.log("buf.length =", buf.length)
                 BO = 0;
             }
-            console.log("getNextRenditionFromRateMap: BO =", BO);
+            if (self.DEBUG) { console.log("getNextRenditionFromRateMap: BO =", BO) };
             // Determine R_p and R_m
             if (R_prev === R[R.length-1]) {
                 R_p = R[R.length-1];
@@ -563,7 +565,7 @@ $(function () {
                 } else {
                     R_next = R_prev;
                 };
-                console.log("getNextRenditionFromRateMap: R_f =", R_f);
+                if (self.DEBUG) { console.log("getNextRenditionFromRateMap: R_f =", R_f) };
             };
             // Returns the rendition...
             return r_i[_.indexOf(R, R_next)];
@@ -681,3 +683,42 @@ $(function () {
     });
 
 });
+
+
+// var checkInterval  = 50.0
+// var lastPlayPos    = 0
+// var currentPlayPos = 0
+// var bufferingDetected = false
+// var player = document.getElementById('videoPlayer')
+
+// setInterval(checkBuffering, checkInterval)
+// function checkBuffering() {
+//     currentPlayPos = player.currentTime
+
+//     // checking offset, e.g. 1 / 50ms = 0.02
+//     var offset = 1 / checkInterval
+
+//     // if no buffering is currently detected,
+//     // and the position does not seem to increase
+//     // and the player isn't manually paused...
+//     if (
+//             !bufferingDetected 
+//             && currentPlayPos < (lastPlayPos + offset)
+//             && !player.paused
+//         ) {
+//         console.log("buffering")
+//         bufferingDetected = true
+//     }
+
+//     // if we were buffering but the player has advanced,
+//     // then there is no buffering
+//     if (
+//         bufferingDetected 
+//         && currentPlayPos > (lastPlayPos + offset)
+//         && !player.paused
+//         ) {
+//         console.log("not buffering anymore")
+//         bufferingDetected = false
+//     }
+//     lastPlayPos = currentPlayPos
+// }
