@@ -14,6 +14,57 @@ $(function () {
         self.DEBUG = false;
         self.LOGON = true;
 
+        // Variables for rebuffering check
+        var checkInterval  = 100.0;
+        var lastPlayPos    = 0;
+        var currentPlayPos = 0;
+        var bufferingDetected = false;
+
+        function checkBuffering() {
+            var player = self.videoElement;
+            currentPlayPos = player.currentTime;
+            var offset = 1 / checkInterval;
+            // if no buffering is currently detected,
+            // and the position does not seem to increase
+            // and the player isn't manually paused...
+            if (
+                    !bufferingDetected
+                    && currentPlayPos < (lastPlayPos + offset)
+                    && !player.paused
+                ) {
+                if (self.LOGON) console.log("checkBuffering: buffering begin", player.currentTime);
+                bufferingDetected = true;
+            }
+            // if we were buffering but the player has advanced,
+            // then there is no buffering
+            if (
+                bufferingDetected 
+                && currentPlayPos > (lastPlayPos + offset)
+                && !player.paused
+                ) {
+                if (self.LOGON) console.log("checkBuffering: buffering end", player.currentTime);
+                bufferingDetected = false;
+            }
+            lastPlayPos = currentPlayPos;
+        };
+
+        var lastClusterTimeStart;
+        function checkRendition() {
+            var player = self.videoElement;
+            var currentCluster = _.filter(self.clusters, function (cluster) { 
+                return (cluster.timeStart <= player.currentTime 
+                        && cluster.timeEnd >= player.currentTime
+                        && cluster.rendition == self.rendition);
+            });
+            currentCluster = currentCluster[0];
+            if (lastClusterTimeStart != currentCluster.timeStart) {
+                if (self.LOGON) console.log("checkRendition: rendition =", currentCluster.rendition, 
+                                                            "timeStart =", currentCluster.timeStart,
+                                                            "timeEnd =", currentCluster.timeEnd);
+                lastClusterTimeStart = currentCluster.timeStart;
+            }
+        }
+
         function Cluster(fileUrl, rendition, byteStart, byteEnd, isInitCluster, timeStart, timeEnd) {
             this.byteStart = byteStart; //byte range start inclusive
             this.byteEnd = byteEnd; //byte range end exclusive
@@ -127,6 +178,8 @@ $(function () {
                 self.videoElement.src = window.URL.createObjectURL(self.mediaSource);
                 $('#basic-player').append($(self.videoElement));
             });
+            setInterval(checkBuffering, checkInterval);
+            setInterval(checkRendition, checkInterval);
         }
         this.downloadClusterData = function (callback) {
             // console.log("downloadClusterData"); // Called only once on initialization
@@ -210,7 +263,6 @@ $(function () {
                 })
             };
         }
-
         this.flushBufferQueue = function () {
             if (!self.sourceBuffer.updating) {
                 var initCluster = _.findWhere(self.clusters, {isInitCluster: true, rendition: self.rendition});
@@ -232,7 +284,7 @@ $(function () {
                             bufferedCluster.queued = false;
                             bufferedCluster.buffered = true;
                         });
-                        self.sourceBuffer.appendBuffer(concatData);
+                        self.sourceBuffer.appendBuffer(concatData);   
                     }
                     // _.each(bufferQueue, function (cluster) {
                     //     console.log("flushBufferQueue: cluster timeStart, timeEnd =", cluster.timeStart, cluster.timeEnd);
@@ -265,7 +317,6 @@ $(function () {
             }
         }
         this.downloadUpcomingClusters = function () {
-            // console.log("downloadUpcomingClusters");
             var nextClusters = _.filter(self.clusters, function (cluster) {
                 // Not downloaded yet && current rendition && start time is within 5s from now
                 if (typeof self.MAXBUFFERLENGTH === 'undefined') {
@@ -683,42 +734,3 @@ $(function () {
     });
 
 });
-
-
-// var checkInterval  = 50.0
-// var lastPlayPos    = 0
-// var currentPlayPos = 0
-// var bufferingDetected = false
-// var player = document.getElementById('videoPlayer')
-
-// setInterval(checkBuffering, checkInterval)
-// function checkBuffering() {
-//     currentPlayPos = player.currentTime
-
-//     // checking offset, e.g. 1 / 50ms = 0.02
-//     var offset = 1 / checkInterval
-
-//     // if no buffering is currently detected,
-//     // and the position does not seem to increase
-//     // and the player isn't manually paused...
-//     if (
-//             !bufferingDetected 
-//             && currentPlayPos < (lastPlayPos + offset)
-//             && !player.paused
-//         ) {
-//         console.log("buffering")
-//         bufferingDetected = true
-//     }
-
-//     // if we were buffering but the player has advanced,
-//     // then there is no buffering
-//     if (
-//         bufferingDetected 
-//         && currentPlayPos > (lastPlayPos + offset)
-//         && !player.paused
-//         ) {
-//         console.log("not buffering anymore")
-//         bufferingDetected = false
-//     }
-//     lastPlayPos = currentPlayPos
-// }
