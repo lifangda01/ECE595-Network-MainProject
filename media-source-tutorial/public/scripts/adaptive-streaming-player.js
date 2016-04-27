@@ -9,7 +9,7 @@ $(function () {
         self.avgChunkSizes = [];
         // self.renditions = ["180","1080"];
         self.rendition = "1080";
-        self.algorithm = "BBA1";
+        self.algorithm = "BBA0";
         self.MAXBUFFERLENGTH = 15; // Fetch ahead max 30s (the farthest cluster starts within 30s)
         self.DEBUG = false;
         self.LOGON = true;
@@ -22,6 +22,7 @@ $(function () {
 
         function checkBuffering() {
             var player = self.videoElement;
+            if (player == undefined) { return; };
             currentPlayPos = player.currentTime;
             var offset = 1 / checkInterval;
             // if no buffering is currently detected,
@@ -51,11 +52,13 @@ $(function () {
         var lastClusterTimeStart;
         function checkRendition() {
             var player = self.videoElement;
+            if (player == undefined) { return; };
             var currentCluster = _.filter(self.clusters, function (cluster) { 
                 return (cluster.timeStart <= player.currentTime 
                         && cluster.timeEnd >= player.currentTime
                         && cluster.rendition == self.rendition);
             });
+            if (currentCluster.length == 0) { return; };
             currentCluster = currentCluster[0];
             if (lastClusterTimeStart != currentCluster.timeStart) {
                 if (self.LOGON) console.log("checkRendition: rendition =", currentCluster.rendition, 
