@@ -1,8 +1,0 @@
-{% extends "base.html" %}
-{% block hlsplayer %}
-  <h2>HLS HTML5 video, {{ title }}</h2>
-    <video controls width="640" height="480">
-      <source src="static/videos/hls/{{ title }}" type="application/x-mpegURL">
-      Your browser does not support the video tag.
-    </video>
-{% endblock %}
